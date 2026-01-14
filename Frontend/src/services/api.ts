@@ -41,6 +41,11 @@ export interface CalendarSlot {
 }
 
 export const apiService = {
+  getCalls: async (): Promise<Call[]> => {
+    const response = await api.get('/api/calls');
+    return response.data;
+  },
+
   getCall: async (callId: number): Promise<Call> => {
     const response = await api.get(`/api/calls/${callId}`);
     return response.data;
@@ -53,6 +58,11 @@ export const apiService = {
 
   getAvailability: async (daysAhead: number = 14): Promise<{ available_slots: CalendarSlot[] }> => {
     const response = await api.get(`/api/calendar/availability?days_ahead=${daysAhead}`);
+    return response.data;
+  },
+
+  getAppointments: async (): Promise<Appointment[]> => {
+    const response = await api.get('/api/appointments');
     return response.data;
   },
 

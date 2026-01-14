@@ -37,7 +37,6 @@ class CalendarService:
                         "Please create a service account in Google Cloud Console and download the JSON key file. "
                         "See: https://cloud.google.com/iam/docs/service-accounts"
                     )
-                    print(f"[ERROR] {error_msg}")
                     raise ValueError(error_msg)
                 else:
                     credentials = service_account.Credentials.from_service_account_info(
@@ -55,8 +54,6 @@ class CalendarService:
             return self.service
         except Exception as e:
             error_msg = f"Could not initialize Google Calendar service: {e}"
-            print(f"[ERROR] {error_msg}")
-            print(f"[INFO] Calendar operations will use mock slots until service account is configured")
             raise ValueError(error_msg)
     
     async def get_available_slots(self, start_date: datetime, end_date: datetime, duration_minutes: int = 30) -> List[Dict]:
@@ -110,15 +107,10 @@ class CalendarService:
             return available_slots[:10]
             
         except HttpError as e:
-            print(f"[WARNING] Google Calendar API error: {e}")
-            print(f"[WARNING] Using mock slots for development")
             return self._get_mock_slots(start_date)
         except ValueError as ve:
-            print(f"[WARNING] Google Calendar credentials issue: {ve}")
-            print(f"[WARNING] Using mock slots for development")
             return self._get_mock_slots(start_date)
         except Exception as e:
-            print(f"[WARNING] Error in get_available_slots: {e}")
             import traceback
             traceback.print_exc()
             return self._get_mock_slots(start_date)
@@ -175,14 +167,10 @@ class CalendarService:
             return created_event.get('id')
             
         except HttpError as e:
-            print(f"[WARNING] Google Calendar API error creating event: {e}")
             return None
         except ValueError as ve:
-            print(f"[WARNING] Google Calendar credentials issue: {ve}")
-            print(f"[WARNING] Calendar event not created - appointment will be saved but not synced to Google Calendar")
             return None
         except Exception as e:
-            print(f"[WARNING] Error in create_calendar_event: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -206,7 +194,6 @@ class CalendarService:
             return True
             
         except Exception as e:
-            print(f"Error checking slot availability: {e}")
             return False
 
 calendar_service = CalendarService()

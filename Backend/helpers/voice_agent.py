@@ -80,10 +80,7 @@ class VoiceAgent:
                         if q["key"] not in answered_keys:
                             self.current_question_index = i
                             break
-                    
-                    print(f"   → get_next_message: Loaded question index {self.current_question_index}/{len(self.questions)} from DB (answered: {list(answered_keys)})", flush=True)
-                except Exception as e:
-                    print(f"   ⚠️  Could not load question index in get_next_message: {e}", flush=True)
+                except Exception:
                     import traceback
                     traceback.print_exc()
                     self.current_question_index = 0
@@ -119,31 +116,25 @@ class VoiceAgent:
         }
         
         field_info = f", current_field={self.current_field}" if self.current_field else ""
-        print(f"   → Processing: state={self.current_state.value}{field_info}", flush=True)
         
         if self.current_state == CallState.GREETING:
             
             if not response or not response.strip():
                 await self._transition_to(CallState.PRACTICE_AREA)
-                print(f"   → State transition: GREETING → PRACTICE_AREA (empty response, will ask question)", flush=True)
                 result["message"] = await self.get_next_message()
             else:
                 practice_area = validate_practice_area(response)
-                print(f"   → GREETING: Checking response '{response}' for practice area...", flush=True)
                 
                 if practice_area:
                     self.intake_call.practice_area = practice_area
                     await self.intake_call.save()
-                    print(f"   ✓ Practice area detected in greeting: {practice_area}", flush=True)
                     await self._transition_to(CallState.PERSONAL_INFO)
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
                     await self.intake_call.save()
-                    print(f"   → State transition: GREETING → PERSONAL_INFO (practice area already provided)", flush=True)
                     result["message"] = await self.get_next_message()
                 else:
                     await self._transition_to(CallState.PRACTICE_AREA)
-                    print(f"   → State transition: GREETING → PRACTICE_AREA (no practice area in response, will ask question)", flush=True)
                     result["message"] = await self.get_next_message()
         
         elif self.current_state == CallState.PRACTICE_AREA:
@@ -151,7 +142,6 @@ class VoiceAgent:
             if practice_area:
                 self.intake_call.practice_area = practice_area
                 await self.intake_call.save()
-                print(f"   ✓ Practice area set to: {practice_area}", flush=True)
                 await self._transition_to(CallState.PERSONAL_INFO)
                 self.current_field = "name"
                 self.intake_call.current_field = "name"
@@ -162,7 +152,6 @@ class VoiceAgent:
                 if "personal" in response_lower:
                     self.intake_call.practice_area = "Personal Injury"
                     await self.intake_call.save()
-                    print(f"   ✓ Practice area inferred as: Personal Injury", flush=True)
                     await self._transition_to(CallState.PERSONAL_INFO)
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
@@ -171,7 +160,6 @@ class VoiceAgent:
                 elif "lemon" in response_lower:
                     self.intake_call.practice_area = "Lemon Law"
                     await self.intake_call.save()
-                    print(f"   ✓ Practice area inferred as: Lemon Law", flush=True)
                     await self._transition_to(CallState.PERSONAL_INFO)
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
@@ -186,7 +174,6 @@ class VoiceAgent:
             if practice_area:
                 self.intake_call.practice_area = practice_area
                 await self.intake_call.save()
-                print(f"   ✓ Practice area set to: {practice_area}", flush=True)
                 await self._transition_to(CallState.PERSONAL_INFO)
                 self.current_field = "name"
                 self.intake_call.current_field = "name"
@@ -197,7 +184,6 @@ class VoiceAgent:
                 if "lemon" in response_lower or "vehicle" in response_lower or "car" in response_lower or "defect" in response_lower:
                     self.intake_call.practice_area = "Lemon Law"
                     await self.intake_call.save()
-                    print(f"   ✓ Practice area matched as: Lemon Law", flush=True)
                     await self._transition_to(CallState.PERSONAL_INFO)
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
@@ -206,7 +192,6 @@ class VoiceAgent:
                 elif "personal" in response_lower or "injury" in response_lower or "accident" in response_lower or "injured" in response_lower:
                     self.intake_call.practice_area = "Personal Injury"
                     await self.intake_call.save()
-                    print(f"   ✓ Practice area matched as: Personal Injury", flush=True)
                     await self._transition_to(CallState.PERSONAL_INFO)
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
@@ -215,7 +200,6 @@ class VoiceAgent:
                 else:
                     self.intake_call.practice_area = "Personal Injury"
                     await self.intake_call.save()
-                    print(f"   ✓ Practice area defaulted to: Personal Injury", flush=True)
                     await self._transition_to(CallState.PERSONAL_INFO)
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
@@ -224,7 +208,6 @@ class VoiceAgent:
         
         elif self.current_state == CallState.PERSONAL_INFO:
             if not response or not response.strip():
-                print(f"   ⚠️  Empty response received in PERSONAL_INFO", flush=True)
                 if not self.current_field:
                     self.current_field = "name"
                     self.intake_call.current_field = "name"
@@ -236,33 +219,26 @@ class VoiceAgent:
                 self.current_field = "name"
                 self.intake_call.current_field = "name"
                 await self.intake_call.save()
-                print(f"   → Initialized current_field: {self.current_field}", flush=True)
-            
-            print(f"   → PERSONAL_INFO: current_field={self.current_field}, input='{response}'", flush=True)
             
             if self.current_field == "name":
                 cleaned_response = response.strip('?').strip()
                 
                 if not cleaned_response:
-                    print(f"   ❌ Validation failed: Empty name", flush=True)
                     result["message"] = "I didn't catch that. Please provide your full name."
                     return result
                 
                 from helpers.validators import extract_phone_number
                 extracted_phone = extract_phone_number(cleaned_response)
                 if extracted_phone:
-                    print(f"   ❌ Validation failed: Response looks like phone number ({extracted_phone})", flush=True)
                     result["message"] = "That sounds like a phone number. I need your full name first. Please say your name."
                     return result
                 
                 if not any(c.isalpha() for c in cleaned_response):
-                    print(f"   ❌ Validation failed: No letters in name '{cleaned_response}'", flush=True)
                     result["message"] = "I need your full name, not just numbers. Please say your name."
                     return result
                 
                 self.personal_info["full_name"] = cleaned_response
                 validated_input = cleaned_response
-                print(f"   ✓ Validation passed: name='{validated_input}'", flush=True)
                 
                 try:
                     if self.intake_call.caller_id:
@@ -286,30 +262,25 @@ class VoiceAgent:
                         )
                         self.intake_call.caller = caller
                         await self.intake_call.save()
-                    print(f"   ✓ Name saved to database: '{validated_input}'", flush=True)
-                except Exception as e:
-                    print(f"   ⚠️  Database save error: {e}", flush=True)
-                
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
                 self.current_field = "phone"
                 self.intake_call.current_field = "phone"
                 await self.intake_call.save()
-                print(f"   → Advanced to next field: {self.current_field}", flush=True)
                 result["message"] = await self.get_next_message()
                 
             elif self.current_field == "phone":
                 from helpers.validators import extract_phone_number, validate_phone
                 
                 extracted_phone = extract_phone_number(response)
-                print(f"   → Extracted phone: {extracted_phone}", flush=True)
                 
                 if not extracted_phone or not validate_phone(extracted_phone):
-                    print(f"   ❌ Validation failed: Invalid phone '{response}' (extracted: {extracted_phone})", flush=True)
                     result["message"] = "I didn't catch a valid phone number. Please say your phone number clearly, including the country code. For example, plus 9 2 3 3 3 1 2 3 4 5 6 7."
                     return result
                 
                 validated_input = extracted_phone
                 self.personal_info["phone"] = validated_input
-                print(f"   ✓ Validation passed: phone='{validated_input}'", flush=True)
                 
                 try:
                     if self.intake_call.caller_id:
@@ -326,22 +297,18 @@ class VoiceAgent:
                         )
                         self.intake_call.caller = caller
                         await self.intake_call.save()
-                    print(f"   ✓ Phone saved to database: '{validated_input}'", flush=True)
-                except Exception as e:
-                    print(f"   ⚠️  Database save error: {e}", flush=True)
-                
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
                 self.current_field = "email"
                 self.intake_call.current_field = "email"
                 await self.intake_call.save()
-                print(f"   → Advanced to next field: {self.current_field}", flush=True)
                 result["message"] = await self.get_next_message()
                 
             elif self.current_field == "email":
-                print(f"   → Extracting email from spoken text: '{response}'", flush=True)
                 extracted_email = extract_email(response)
                 
                 if not extracted_email:
-                    print(f"   ❌ Validation failed: Could not extract valid email from '{response}'", flush=True)
                     result["message"] = "I didn't catch a valid email address. Please say your email address clearly, like: muhammadhassib at gmail dot com."
                     return result
                 
@@ -349,12 +316,10 @@ class VoiceAgent:
                 self.personal_info["email"] = validated_input
                 self.intake_call.pending_email = validated_input
                 await self.intake_call.save()
-                print(f"   ✓ Email extracted: '{validated_input}' (awaiting confirmation)", flush=True)
                 
                 self.current_field = "email_confirm"
                 self.intake_call.current_field = "email_confirm"
                 await self.intake_call.save()
-                print(f"   → Advanced to email confirmation", flush=True)
                 result["message"] = await self.get_next_message()
                 
             elif self.current_field == "email_confirm":
@@ -363,7 +328,6 @@ class VoiceAgent:
                 
                 if "yes" in confirmation_response or "correct" in confirmation_response or "right" in confirmation_response:
                     validated_input = pending_email
-                    print(f"   ✓ Email confirmed: '{validated_input}'", flush=True)
                     
                     try:
                         if self.intake_call.caller_id:
@@ -405,20 +369,16 @@ class VoiceAgent:
                         self.intake_call.caller = caller
                         self.intake_call.pending_email = None
                         await self.intake_call.save()
-                        print(f"   ✓ Email saved to database: '{validated_input}'", flush=True)
                     except Exception as e:
-                        print(f"   ⚠️  Database save error: {e}", flush=True)
                         import traceback
                         traceback.print_exc()
                     
                     self.current_field = None
                     self.intake_call.current_field = None
                     await self.intake_call.save()
-                    print(f"   → All personal info collected, transitioning to CONSENT", flush=True)
                     await self._transition_to(CallState.CONSENT)
                     result["message"] = await self.get_next_message()
                 elif "no" in confirmation_response or "wrong" in confirmation_response or "incorrect" in confirmation_response:
-                    print(f"   ⚠️  Email not confirmed, re-asking email", flush=True)
                     self.intake_call.pending_email = None
                     self.current_field = "email"
                     self.intake_call.current_field = "email"
@@ -427,11 +387,9 @@ class VoiceAgent:
                         del self.personal_info["email"]
                     result["message"] = "No problem. Please say your email address again clearly."
                 else:
-                    print(f"   ⚠️  Unclear confirmation response: '{response}'", flush=True)
                     result["message"] = await self.get_next_message()
             
             else:
-                print(f"   ⚠️  Invalid current_field '{self.current_field}', resetting to 'name'", flush=True)
                 self.current_field = "name"
                 self.intake_call.current_field = "name"
                 await self.intake_call.save()
@@ -444,7 +402,6 @@ class VoiceAgent:
             elif "yes" in response.lower() or "sure" in response.lower() or "okay" in response.lower() or "ok" in response.lower() or "yes please" in response.lower():
                 self.intake_call.consent_to_book = True
                 await self.intake_call.save()
-                print(f"   ✓ Consent to book granted", flush=True)
                 await self._transition_to(CallState.CASE_QUESTIONS)
                 result["message"] = await self.get_next_message()
             else:
@@ -468,31 +425,24 @@ class VoiceAgent:
                         if q["key"] not in answered_keys:
                             self.current_question_index = i
                             break
-                    
-                    print(f"   → Loaded question index from DB: {self.current_question_index}/{len(self.questions)} (found {len(answered_keys)} existing answers: {list(answered_keys)})", flush=True)
-                except Exception as e:
-                    print(f"   ⚠️  Could not load question index from DB: {e}, starting from 0", flush=True)
+                except Exception:
                     import traceback
                     traceback.print_exc()
                     self.current_question_index = 0
             
             if self.current_question_index >= len(self.questions):
-                print(f"   → All questions answered ({self.current_question_index}/{len(self.questions)}), transitioning to SHOW_SLOTS", flush=True)
                 await self._transition_to(CallState.SHOW_SLOTS)
                 result["message"] = await self.get_next_message()
                 return result
             
             if self.current_question_index >= len(self.questions):
-                print(f"   ⚠️  Question index {self.current_question_index} is out of range (max: {len(self.questions)-1}), transitioning to SHOW_SLOTS", flush=True)
                 await self._transition_to(CallState.SHOW_SLOTS)
                 result["message"] = await self.get_next_message()
                 return result
             
             question = self.questions[self.current_question_index]
-            print(f"   → Processing question {self.current_question_index + 1}/{len(self.questions)}: {question['key']} = '{question['question'][:60]}'", flush=True)
             
             if not response or response.strip() == "":
-                print(f"   ⚠️  Empty response received for question {self.current_question_index + 1}", flush=True)
                 result["message"] = question["question"] + " Please provide your answer."
                 return result
             
@@ -503,7 +453,6 @@ class VoiceAgent:
                 )
                 
                 if existing_answer:
-                    print(f"   ⚠️  Question {self.current_question_index + 1} ({question['key']}) already answered, advancing...", flush=True)
                     self.current_question_index += 1
                     
                     if self.current_question_index < len(self.questions):
@@ -512,8 +461,8 @@ class VoiceAgent:
                         await self._transition_to(CallState.SHOW_SLOTS)
                         result["message"] = await self.get_next_message()
                     return result
-            except Exception as e:
-                print(f"   ⚠️  Error checking existing answer: {e}", flush=True)
+            except Exception:
+                pass
             
             try:
                 case_question, created = await CaseQuestion.get_or_create(
@@ -530,21 +479,15 @@ class VoiceAgent:
                     case_question.answer = response
                     case_question.question_text = question["question"]
                     await case_question.save()
-                    print(f"   ⚠️  Updated existing answer for question {self.current_question_index + 1}/{len(self.questions)}: {question['key']}", flush=True)
-                else:
-                    print(f"   ✓ Saved NEW answer for question {self.current_question_index + 1}/{len(self.questions)}: {question['key']} = '{response[:50]}'", flush=True)
                 
                 self.current_question_index += 1
-                print(f"   → Advanced to question index: {self.current_question_index}/{len(self.questions)}", flush=True)
                 
                 if self.current_question_index < len(self.questions):
                     result["message"] = await self.get_next_message()
                 else:
-                    print(f"   → All {len(self.questions)} questions answered, transitioning to SHOW_SLOTS", flush=True)
                     await self._transition_to(CallState.SHOW_SLOTS)
                     result["message"] = await self.get_next_message()
-            except Exception as e:
-                print(f"   ❌ Error saving answer: {e}", flush=True)
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 result["message"] = question["question"] + " Please try again."
@@ -587,11 +530,9 @@ class VoiceAgent:
             pass
     
     async def _transition_to(self, new_state: CallState):
-        old_state = self.current_state.value
         self.current_state = new_state
         self.intake_call.current_state = new_state.value
         await self.intake_call.save()
-        print(f"   → State transition: {old_state} → {new_state.value}", flush=True)
     
     async def end_call(self):
         self.intake_call.call_status = "completed"

@@ -6,7 +6,18 @@ export default function Appointments() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(false);
+    const fetchAppointments = async () => {
+      try {
+        const data = await apiService.getAppointments();
+        setAppointments(data);
+      } catch (error) {
+        console.error('Failed to load appointments', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAppointments();
   }, []);
 
   const getStatusColor = (status: string) => {

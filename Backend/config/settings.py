@@ -34,10 +34,7 @@ class Settings:
         }
         missing = [key for key, value in required_vars.items() if not value]
         if missing:
-            print(f"[ERROR] Missing required email environment variables: {', '.join(missing)}")
-            print(f"[ERROR] Please set these in your .env file")
             return False
-        print(f"[OK] Email configuration validated: SENDER_EMAIL={self.SENDER_EMAIL}, SENDER_NAME={self.SENDER_NAME}")
         return True
 
 settings = Settings()

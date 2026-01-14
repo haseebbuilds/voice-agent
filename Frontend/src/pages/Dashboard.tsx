@@ -7,7 +7,18 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(false);
+    const fetchCalls = async () => {
+      try {
+        const data = await apiService.getCalls();
+        setCalls(data);
+      } catch (error) {
+        console.error('Failed to load calls', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCalls();
   }, []);
 
   const getStatusColor = (status: string) => {

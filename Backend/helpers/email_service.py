@@ -13,7 +13,6 @@ async def send_confirmation_email(appointment: Appointment) -> bool:
     sender_name = settings.SENDER_NAME or "Legal Intake Team"
     
     if not sender_email or not sender_password:
-        print(f"[ERROR] Email credentials not configured. SENDER_EMAIL={bool(sender_email)}, SENDER_PASSWORD={bool(sender_password)}")
         return False
     
     try:
@@ -75,12 +74,10 @@ async def send_confirmation_email(appointment: Appointment) -> bool:
         msg.attach(part1)
         msg.attach(part2)
         
-        print(f"[EMAIL] Sending confirmation email from {sender_email} to {caller.email}")
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(sender_email, sender_password)
             server.send_message(msg)
-        print(f"[EMAIL] Confirmation email sent successfully to {caller.email}")
         
         appointment.confirmation_email_sent = True
         await appointment.save()
@@ -88,14 +85,10 @@ async def send_confirmation_email(appointment: Appointment) -> bool:
         return True
         
     except smtplib.SMTPAuthenticationError as auth_error:
-        print(f"[ERROR] Email authentication failed: {auth_error}")
-        print(f"[ERROR] Please verify SENDER_EMAIL and SENDER_PASSWORD in .env file")
         return False
     except smtplib.SMTPException as smtp_error:
-        print(f"[ERROR] SMTP error sending email: {smtp_error}")
         return False
     except Exception as e:
-        print(f"[ERROR] Error sending confirmation email: {e}")
         import traceback
         traceback.print_exc()
         return False

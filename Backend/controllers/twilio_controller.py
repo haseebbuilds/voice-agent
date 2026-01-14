@@ -5,8 +5,6 @@ from models.caller import Caller
 from models.appointment import Appointment
 from models.calendar_event import CalendarEvent
 from helpers.voice_agent import VoiceAgent, CallState
-from helpers.speech_to_text import transcribe_twilio_recording
-from helpers.text_to_speech import generate_twiml_say
 from helpers.calendar_service import calendar_service
 from helpers.email_service import send_confirmation_email
 from config.settings import settings
@@ -14,83 +12,25 @@ from datetime import datetime, timedelta
 from typing import Optional
 import json
 
-async def handle_incoming_call(request: Request) -> str:
-    response = VoiceResponse()
-
-    form = await request.form()
-
-    call_sid = form.get("CallSid")
-    from_number = form.get("From", "")
-    
-    if not call_sid:
-        response.say("Sorry, there was an error processing your call.")
-        return str(response)
-    
-    try:
-        intake_call = await IntakeCall.get(twilio_call_sid=call_sid)
-    except:
-        temp_caller, _ = await Caller.get_or_create(
-            email=f"temp_{call_sid}@temp.com",
-            defaults={
-                "full_name": "Temporary Caller",
-                "phone": from_number
-            }
-        )
-        
-        intake_call = await IntakeCall.create(
-            twilio_call_sid=call_sid,
-            caller=temp_caller,
-            call_status="in_progress",
-            current_state=CallState.GREETING.value,
-            practice_area="",
-            consent_to_book=False
-        )
-    
-    agent = VoiceAgent(intake_call)
-    
-    message = await agent.get_next_message()
-    
-    base_url = settings.APP_URL.rstrip('/')
-    action_url = f'{base_url}/api/twilio/handle-response?call_sid={call_sid}'
-    
-    gather = Gather(
-        input='speech',
-        language='en-US',
-        speech_timeout='auto',
-        action=action_url,
-        method='POST'
-    )
-    gather.say(message, voice='alice')
-    response.append(gather)
-    
-    response.say("I didn't hear anything. Please call back when you're ready.")
-    response.hangup()
-    
-    return str(response)
-
 async def handle_caller_response(request: Request, call_sid: str) -> str:
     from datetime import datetime
     
-    print(f"   📋 Processing response for call: {call_sid}")
     response = VoiceResponse()
 
     form = await request.form()
 
     speech_result = form.get("SpeechResult", "")
-    print(f"   → User said: '{speech_result}'")
     
     from tortoise.exceptions import DoesNotExist, IntegrityError
     
     try:
         intake_call = await IntakeCall.get(twilio_call_sid=call_sid)
-        print(f"   ✓ Found call record: ID={intake_call.id}, State={intake_call.current_state}", flush=True)
         if hasattr(intake_call, 'caller_id') and intake_call.caller_id:
             try:
                 await intake_call.fetch_related('caller')
-            except Exception as fetch_error:
-                print(f"   ⚠️  Could not fetch caller (might not exist yet): {fetch_error}", flush=True)
+            except Exception:
+                pass
     except DoesNotExist:
-        print(f"   ⚠️  Call record not found, creating it now...", flush=True)
         try:
             from_number = form.get("From", "")
             temp_caller, _ = await Caller.get_or_create(
@@ -111,29 +51,20 @@ async def handle_caller_response(request: Request, call_sid: str) -> str:
                     "consent_to_book": False
                 }
             )
-            if created:
-                print(f"   ✓ Created call record with temp caller: ID={intake_call.id}", flush=True)
-            else:
-                print(f"   ✓ Found existing call record (race condition handled): ID={intake_call.id}", flush=True)
-        except IntegrityError as ie:
-            print(f"   ⚠️  Integrity error (race condition), trying to get existing: {ie}", flush=True)
+        except IntegrityError:
             try:
                 intake_call = await IntakeCall.get(twilio_call_sid=call_sid)
-                print(f"   ✓ Found call record after integrity error: ID={intake_call.id}", flush=True)
             except DoesNotExist:
-                print(f"   ❌ Call record still doesn't exist after retry", flush=True)
                 response.say("Sorry, there was an error processing your call. Please try again.", voice='alice')
                 response.hangup()
                 return str(response)
-        except Exception as create_error:
-            print(f"   ❌ Failed to create/get call record: {create_error}", flush=True)
+        except Exception:
             import traceback
             traceback.print_exc()
             response.say("Sorry, there was an error processing your call. Please try again.", voice='alice')
             response.hangup()
             return str(response)
-    except Exception as e:
-        print(f"   ⚠️  Unexpected error getting call record: {e}", flush=True)
+    except Exception:
         import traceback
         traceback.print_exc()
         try:
@@ -155,37 +86,21 @@ async def handle_caller_response(request: Request, call_sid: str) -> str:
                     "consent_to_book": False
                 }
             )
-            print(f"   ✓ Recovered with get_or_create: ID={intake_call.id}, created={created}", flush=True)
-        except Exception as recover_error:
-            print(f"   ❌ Failed to recover: {recover_error}", flush=True)
+        except Exception:
             response.say("Sorry, there was an error processing your call. Please try again.", voice='alice')
             response.hangup()
             return str(response)
     
-    print(f"   🤖 Initializing voice agent...", flush=True)
     try:
         agent = VoiceAgent(intake_call)
-        print(f"   ✓ Agent initialized, current state: {agent.current_state.value}", flush=True)
-    except Exception as e:
-        print(f"   ❌ Error initializing agent: {e}", flush=True)
+    except Exception:
         import traceback
         traceback.print_exc()
         response.say("Sorry, there was an error. Please try again.", voice='alice')
         response.hangup()
         return str(response)
     
-    import sys
-    print(f"   → Processing response through state machine...", flush=True)
-    print(f"   → Current state: {agent.current_state.value}", flush=True)
-    print(f"   → User response: '{speech_result}'", flush=True)
     result = await agent.process_response(speech_result)
-    print(f"   ✓ Response processed:", flush=True)
-    print(f"      - Next message: '{result['message'][:80]}...'", flush=True)
-    print(f"      - Action: {result['action']}", flush=True)
-    print(f"      - Current state: {agent.current_state.value}", flush=True)
-    print(f"      - Current field: {agent.current_field or 'None'}", flush=True)
-    print(f"      - Practice area: {intake_call.practice_area}", flush=True)
-    sys.stdout.flush()
     
     if result["action"] == "end":
         response.say(result["message"], voice='alice')

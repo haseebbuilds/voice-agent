@@ -28,20 +28,15 @@ async def startup_event():
     from config.settings import settings
     
     email_valid = settings.validate_email_config()
-    if not email_valid:
-        print("[WARNING] Email configuration invalid - email sending will fail")
     
     try:
         await init_db()
-        print("Database initialized successfully")
     except Exception as e:
-        print(f"Warning: Database initialization failed: {e}")
-        print("Server will continue but database features may not work")
+        pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await close_db()
-    print("Database connection closed")
 
 @app.get("/")
 async def root():

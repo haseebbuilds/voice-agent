@@ -5,7 +5,6 @@ from models.intake_call import IntakeCall
 from models.appointment import Appointment
 from models.caller import Caller
 from controllers.twilio_controller import (
-    handle_incoming_call,
     handle_caller_response,
     handle_slot_selection
 )
@@ -18,113 +17,63 @@ router = APIRouter(prefix="/api", tags=["intake"])
 
 @router.post("/twilio/webhook")
 async def twilio_webhook(request: Request):
-    import sys
     from fastapi.responses import Response
     from twilio.twiml.voice_response import VoiceResponse
-    
-    sys.stdout.flush()
-    sys.stderr.flush()
-    
-    print("\n" + "=" * 70, flush=True)
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📞 WEBHOOK CALLED", flush=True)
-    print("=" * 70, flush=True)
-    
     try:
         form = await request.form()
         form_dict = dict(form)
         call_sid = form_dict.get('CallSid', '')
         from_number = form_dict.get('From', '')
-        
-        print(f"CallSid: {call_sid}", flush=True)
-        print(f"From: {from_number}", flush=True)
-        print("-" * 70, flush=True)
-        sys.stdout.flush()
 
         if not call_sid:
-            print("❌ No CallSid", flush=True)
             resp = VoiceResponse()
             resp.say("Sorry, there was an error.", voice="alice")
             resp.hangup()
             return Response(content=str(resp), media_type="application/xml")
 
-        intake_call = None
-        try:
-            print("→ Creating call record in database...", flush=True)
-            from models.intake_call import IntakeCall
-            from models.caller import Caller
-            from helpers.voice_agent import CallState
-            from tortoise.exceptions import IntegrityError, DoesNotExist, TransactionManagementError
-            
-            try:
-                intake_call = await IntakeCall.get(twilio_call_sid=call_sid)
-                print(f"→ Found existing call record: ID={intake_call.id}", flush=True)
-            except (DoesNotExist, TransactionManagementError):
-                print(f"→ Creating new call record with temp caller...", flush=True)
-                temp_caller, _ = await Caller.get_or_create(
-                    email=f"temp_{call_sid}@temp.com",
-                    defaults={
-                        "full_name": "Temporary",
-                        "phone": from_number or ""
-                    }
-                )
-                intake_call, created = await IntakeCall.get_or_create(
-                    twilio_call_sid=call_sid,
-                    defaults={
-                        "caller": temp_caller,
-                        "call_status": "in_progress",
-                        "current_state": CallState.GREETING.value,
-                        "practice_area": "",
-                        "consent_to_book": False
-                    }
-                )
-                if created:
-                    print(f"→ Created call record: ID={intake_call.id}", flush=True)
-                else:
-                    print(f"→ Found existing call record after retry: ID={intake_call.id}", flush=True)
-        except Exception as e:
-            print(f"⚠️  Database error (will create in handle-response): {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+        from models.intake_call import IntakeCall
+        from models.caller import Caller
+        from helpers.voice_agent import CallState
+        from tortoise.exceptions import IntegrityError, DoesNotExist, TransactionManagementError
 
+        try:
+            intake_call = await IntakeCall.get(twilio_call_sid=call_sid)
+        except (DoesNotExist, TransactionManagementError):
+            temp_caller, _ = await Caller.get_or_create(
+                email=f"temp_{call_sid}@temp.com",
+                defaults={
+                    "full_name": "Temporary",
+                    "phone": from_number or ""
+                }
+            )
+            intake_call, _ = await IntakeCall.get_or_create(
+                twilio_call_sid=call_sid,
+                defaults={
+                    "caller": temp_caller,
+                    "call_status": "in_progress",
+                    "current_state": CallState.GREETING.value,
+                    "practice_area": "",
+                    "consent_to_book": False
+                }
+            )
         resp = VoiceResponse()
-        
-        print("→ Adding greeting only (practice area question will come next)...", flush=True)
         from config.settings import settings
         base_url = settings.APP_URL.rstrip('/')
         action_url = f'{base_url}/api/twilio/handle-response?call_sid={call_sid}'
-        
         resp.say(
             "Hi, this is the automated intake assistant. I can help you schedule a consultation.",
             voice="alice",
         )
-        
-        gather = resp.gather(
+        resp.gather(
             input='speech',
             language='en-US',
             speech_timeout='5',
             action=action_url,
             method='POST'
         )
-        
-        print(f"→ Greeting Gather created (silent - no question), Action: {action_url}", flush=True)
-        
         resp.redirect(action_url)
-
-        twiml_response = str(resp)
-        print(f"→ TwiML length: {len(twiml_response)} chars", flush=True)
-        print("→ FULL TwiML:", flush=True)
-        print(twiml_response, flush=True)
-        print("=" * 70 + "\n", flush=True)
-        sys.stdout.flush()
-
-        return Response(content=twiml_response, media_type="application/xml")
-        
-    except Exception as e:
-        print(f"\n❌❌❌ ERROR: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
-        
+        return Response(content=str(resp), media_type="application/xml")
+    except Exception:
         resp = VoiceResponse()
         resp.say("Sorry, there was an error. Please try again later.", voice="alice")
         resp.hangup()
@@ -135,34 +84,13 @@ async def twilio_webhook(request: Request):
 async def twilio_handle_response(request: Request, call_sid: str):
     from fastapi.responses import Response
     from twilio.twiml.voice_response import VoiceResponse
-    import sys
-    
-    sys.stdout.flush()
-    
-    print("\n" + "=" * 70, flush=True)
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🎯 HANDLING RESPONSE", flush=True)
-    print(f"CallSid: {call_sid}", flush=True)
-    
     try:
         form = await request.form()
         form_dict = dict(form)
-        speech_result = form_dict.get("SpeechResult", "")
-        
-        print(f"SpeechResult: '{speech_result}'", flush=True)
-        print("-" * 70, flush=True)
-        sys.stdout.flush()
-        
+        _ = form_dict.get("SpeechResult", "")
         twiml = await handle_caller_response(request, call_sid)
-        print("✓ Success", flush=True)
-        print("=" * 70 + "\n", flush=True)
-        sys.stdout.flush()
         return Response(content=twiml, media_type="application/xml")
-    except Exception as e:
-        print(f"❌ ERROR: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
-        print("=" * 70 + "\n", flush=True)
+    except Exception:
         response = VoiceResponse()
         response.say("Sorry, there was an error. Please try again.", voice='alice')
         from config.settings import settings
@@ -184,10 +112,7 @@ async def twilio_handle_slot_selection(request: Request, call_sid: str, slot_dat
     try:
         twiml = await handle_slot_selection(request, call_sid, slot_datetime)
         return Response(content=twiml, media_type="application/xml")
-    except Exception as e:
-        print(f"Error handling slot selection: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
         from twilio.twiml.voice_response import VoiceResponse
         response = VoiceResponse()
         response.say("Sorry, there was an error selecting the slot.", voice='alice')
@@ -220,7 +145,6 @@ async def twilio_handle_transfer_response(request: Request, call_sid: str):
             await agent.end_call()
             response.hangup()
         else:
-            response.say("I didn't catch that. Please say transfer to speak with someone, or say message to leave a message.", voice='alice')
             from config.settings import settings
             base_url = settings.APP_URL.rstrip('/')
             gather = response.gather(
@@ -230,16 +154,11 @@ async def twilio_handle_transfer_response(request: Request, call_sid: str):
                 action=f'{base_url}/api/twilio/handle-transfer-response?call_sid={call_sid}',
                 method='POST'
             )
-            gather.say("Please say transfer or message.", voice='alice')
+            gather.say("Please say transfer to speak with someone, or say message to leave a message.", voice='alice')
             response.append(gather)
-            response.say("Thank you for calling.", voice='alice')
-            response.hangup()
         
         return Response(content=str(response), media_type="application/xml")
-    except Exception as e:
-        print(f"Error handling transfer response: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
         response = VoiceResponse()
         response.say("Thank you for calling. Someone will contact you soon.", voice='alice')
         response.hangup()
@@ -263,6 +182,23 @@ async def get_call_details(call_id: int):
         raise HTTPException(status_code=404, detail="Call not found")
 
 
+@router.get("/calls")
+async def list_calls():
+    calls = await IntakeCall.all().order_by("-created_at")
+    return [
+        {
+            "id": call.id,
+            "twilio_call_sid": call.twilio_call_sid,
+            "practice_area": call.practice_area,
+            "call_status": call.call_status,
+            "current_state": call.current_state,
+            "consent_to_book": call.consent_to_book,
+            "created_at": call.created_at.isoformat(),
+        }
+        for call in calls
+    ]
+
+
 @router.get("/calls/{call_id}/state")
 async def get_call_state(call_id: int):
     try:
@@ -282,6 +218,30 @@ async def get_availability(days_ahead: int = 14):
     end_date = start_date + timedelta(days=days_ahead)
     slots = await calendar_service.get_available_slots(start_date, end_date)
     return {"available_slots": slots}
+
+
+@router.get("/appointments")
+async def list_appointments():
+    appointments = await Appointment.all().order_by("-appointment_date")
+    result = []
+    for appointment in appointments:
+        caller = await Caller.get(id=appointment.caller_id)
+        result.append(
+            {
+                "id": appointment.id,
+                "caller": {
+                    "name": caller.full_name,
+                    "email": caller.email,
+                    "phone": caller.phone,
+                },
+                "practice_area": appointment.practice_area,
+                "appointment_date": appointment.appointment_date.isoformat(),
+                "appointment_time": appointment.appointment_time.isoformat(),
+                "booking_status": appointment.booking_status,
+                "confirmation_email_sent": appointment.confirmation_email_sent,
+            }
+        )
+    return result
 
 
 @router.get("/appointments/{appointment_id}")
