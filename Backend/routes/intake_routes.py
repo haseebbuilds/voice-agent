@@ -75,7 +75,7 @@ async def twilio_webhook(request: Request):
         return Response(content=str(resp), media_type="application/xml")
     except Exception:
         resp = VoiceResponse()
-        resp.say("Sorry, there was an error. Please try again later.", voice="alice")
+        resp.say("Sorry, there is an error. Please try again later.", voice="alice")
         resp.hangup()
         return Response(content=str(resp), media_type="application/xml")
 
